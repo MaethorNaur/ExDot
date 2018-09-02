@@ -76,8 +76,20 @@ defmodule ExDot.Parser do
     [key, value] -> [{key, value}]
   end
 
-  define :string, "<'\"'> (<!'\"'> ('\\\\' / '\\\"' / .))* <'\"'>" do
+  define :string, "<'\"'> (double_string)* <'\"'>" do
     [chars] -> Enum.join(chars)
+  end
+
+  define(:double_string, "(<!('\"' / '\\\\')> .) / (<'\\\\'> escape_sequence)")
+
+  define :escape_sequence, "'\"' / '\\\\' / 'b' / 'f' / 'n' / 'r' / 't' / 'v'" do
+    "b" -> "\b"
+    "f" -> "\f"
+    "n" -> "\n"
+    "r" -> "\r"
+    "t" -> "\t"
+    "v" -> "\v"
+    value -> value
   end
 
   define :ID, "[a-zA-Z][a-zA-Z0-9_]*" do

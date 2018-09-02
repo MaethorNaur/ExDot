@@ -5,9 +5,13 @@ defmodule ExDot do
 
   def from_file(file) do
     case File.read(file) do
-      {:ok, string} -> ExDot.Parser.parse(string) |> create_graph
+      {:ok, string} -> ExDot.Parser.parse(string)
       error -> error
     end
+  end
+
+  defp create_graph({:ok, %{statements: statements}, _}) do
+    {:error, "Invalid DOT file"}
   end
 
   defp create_graph({:ok, %{statements: statements}}) do
