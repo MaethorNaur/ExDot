@@ -15,23 +15,24 @@ defmodule ExDot do
   end
 
   defp create_graph({:ok, %{statements: statements}}) do
-    graph = Graph.new()
-
     graph =
       statements
       |> Stream.filter(fn
         %{type: "node", name: _} -> true
         _ -> false
       end)
-      |> Enum.reduce(graph, &create_vertex/2)
+      |> Enum.reduce(Graph.new(), &create_vertex/2)
 
-    statements
-    |> Stream.filter(fn
-      %{type: "edge", from: _} -> true
-      _ -> false
-    end)
-    |> Stream.map(&create_edge/1)
-    |> Enum.reduce(graph, &Graph.add_edge(&2, &1))
+    graph =
+      statements
+      |> Stream.filter(fn
+        %{type: "edge", from: _} -> true
+        _ -> false
+      end)
+      |> Stream.map(&create_edge/1)
+      |> Enum.reduce(graph, &Graph.add_edge(&2, &1))
+
+    {:ok, graph}
   end
 
   defp create_graph(error), do: error
