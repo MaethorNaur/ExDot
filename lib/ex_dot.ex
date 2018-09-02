@@ -5,7 +5,7 @@ defmodule ExDot do
 
   def from_file(file) do
     case File.read(file) do
-      {:ok, string} -> ExDot.Parser.parse(string)
+      {:ok, string} -> ExDot.Parser.parse(string) |> create_graph()
       error -> error
     end
   end
