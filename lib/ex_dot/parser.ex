@@ -22,7 +22,7 @@ defmodule ExDot.Parser do
     "( id_statement / edge_statement / node_statement / attribute_statement)"
   )
 
-  define(:comment, "'/*' (!'*/' .)* '*/'")
+  define(:comment, "'/*' (!'*/' <all>)* '*/'")
 
   define :edge_statement, "node_id <space?> edge_op <space?> node_id <space?> attribute_list*" do
     [from, mode, to, attributes] ->
@@ -80,7 +80,7 @@ defmodule ExDot.Parser do
     [chars] -> Enum.join(chars)
   end
 
-  define(:double_string, "(<!('\"' / '\\\\')> .) / (<'\\\\'> escape_sequence)")
+  define(:double_string, "(<!('\"' / '\\\\')> <all>) / (<'\\\\'> escape_sequence)")
 
   define :escape_sequence, "'\"' / '\\\\' / 'b' / 'f' / 'n' / 'r' / 't' / 'v'" do
     "b" -> "\b"
@@ -98,6 +98,7 @@ defmodule ExDot.Parser do
 
   define(:reserved_keywords, "('node' / 'edge' / 'graph')")
   define(:space, "([ \\s\\t] / comment)*")
+  define(:all, "([\\r\\n] / .)")
   define(:newline, "([ \\r\\n\\s\\t] / comment)*")
 
   defp create_attribute_list(attributes) do

@@ -1,16 +1,18 @@
 defmodule ExDot do
+  @spec from_string(String.t()) :: {:ok, Graph.t()} | {:error, term()}
   def from_string(string) do
     ExDot.Parser.parse(string) |> create_graph
   end
 
+  @spec from_file(String.t()) :: {:ok, Graph.t()} | {:error, term()}
   def from_file(file) do
     case File.read(file) do
-      {:ok, string} -> ExDot.Parser.parse(string) |> create_graph()
+      {:ok, string} -> from_string(string)
       error -> error
     end
   end
 
-  defp create_graph({:ok, %{statements: statements}, _}) do
+  defp create_graph({:ok, %{statements: _statements}, _}) do
     {:error, "Invalid DOT file"}
   end
 
@@ -35,6 +37,7 @@ defmodule ExDot do
     {:ok, graph}
   end
 
+  defp create_graph(:mismatch), do: {:error, :mismatch}
   defp create_graph(error), do: error
 
   defp create_vertex(%{name: name, attributes: attributes}, graph) do
