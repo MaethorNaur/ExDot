@@ -9,18 +9,20 @@ defmodule ExDot.Parser do
         strict: !is_nil(strict),
         mode: graph,
         name: name,
-        statements: statements |> Enum.flat_map(fn v -> v end)
+        statements: statements |> Enum.flat_map(& &1)
       }
   end
-
   define :statements, "statement <space?> <';'?> <newline?>" do
     [l] -> l
   end
 
   define(
     :statement,
-    "( id_statement / edge_statement / node_statement / attribute_statement)"
-  )
+    "( subgraph / id_statement / edge_statement / node_statement / attribute_statement)"
+    )
+    define :subgraph, "<'subgraph'> <space?> <ID?> <space?> <'{'> <newline?> statements* <'}'>" do
+      [statements] -> statements |> Enum.flat_map(& &1)
+    end
 
   define(:comment, "'/*' (!'*/' <all>)* '*/'")
 
@@ -92,7 +94,7 @@ defmodule ExDot.Parser do
     value -> value
   end
 
-  define :ID, "[a-zA-Z][a-zA-Z0-9_]*" do
+  define :ID, "[a-zA-Z0-9_]+" do
     list -> Enum.join(list)
   end
 
