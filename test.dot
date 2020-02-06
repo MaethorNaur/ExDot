@@ -1,0 +1,15 @@
+digraph "test" {
+      /* paper size in inches */
+       size="11.0,8.5";
+       rankdir="UD";
+      /* locate label at top of drawing */
+      labelloc=t;
+      height=1
+      label="Test";
+      /* no directional arrow on connectors */
+      //edge [dir=none];
+      node [shape=box];
+      {A B} -> {C D}
+      E -> {F G}
+      {A B} -> E
+}
