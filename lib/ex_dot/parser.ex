@@ -1,111 +1,214 @@
 defmodule ExDot.Parser do
-  use Neotomex.ExGrammar
+  defstruct [:input, line: 0, position: 0]
+  use ExDot.Parser.Combinator
 
-  @root true
-  define :graph,
-         "'strict'? <space?> ('graph' / 'digraph') <space?> (ID / string)? <space?> <'{'> <newline?> statements* <'}'>" do
-    [strict, graph, name, statements] ->
-      %{
-        strict: !is_nil(strict),
-        mode: graph,
-        name: name,
-        statements: statements |> Enum.flat_map(& &1)
-      }
-  end
-  define :statements, "statement <space?> <';'?> <newline?>" do
-    [l] -> l
-  end
+  def parse(input), do: graph().(input)
 
-  define(
-    :statement,
-    "( subgraph / id_statement / edge_statement / node_statement / attribute_statement)"
-    )
-    define :subgraph, "<'subgraph'> <space?> <ID?> <space?> <'{'> <newline?> statements* <'}'>" do
-      [statements] -> statements |> Enum.flat_map(& &1)
-    end
-
-  define(:comment, "'/*' (!'*/' <all>)* '*/'")
-
-  define :edge_statement, "node_id <space?> edge_op <space?> node_id <space?> attribute_list*" do
-    [from, mode, to, attributes] ->
-      [
+  defp graph,
+    do:
+      optional(whitespaces())
+      ~> optional("strict" ~> whitespaces())
+      ~> ("graph" | "digraph")
+      ~> (optional(whitespaces() ~> (identifier() | string()))
+          ~>> fn
+            nil -> nil
+            [_, identifier] -> identifier
+          end)
+      ~> optional(whitespaces())
+      ~> '{'
+      ~> newline()
+      ~> repeat(statements())
+      ~> '}'
+      ~>> fn [_, strict, graph, name, _, _, _, statements, _] ->
         %{
-          type: "edge",
-          mode: mode,
-          from: from |> hd,
-          to: to |> hd,
-          attributes: attributes |> create_attribute_list
+          strict: !is_nil(strict),
+          mode: graph,
+          name: name,
+          statements: statements |> Enum.flat_map(& &1)
         }
-      ]
-  end
+      end
 
-  define(:edge_op, "'--' / '->'")
+  defp statements,
+    do: statement() ~> optional(whitespaces()) ~> maybe(';') ~> newline() ~>> (&Enum.at(&1, 0))
 
-  define :node_statement, "node_id <space?> attribute_list*" do
-    [l, attributes] ->
-      [%{type: "node", name: l |> hd, attributes: attributes |> create_attribute_list}]
-  end
+  defp statement,
+    do: subgraph() | id_statement() | edge_statement() | node_statement() | attribute_statement()
 
-  define(:node_id, "<!reserved_keywords> ID port?")
+  defp subgraph,
+    do:
+      "subgraph"
+      ~> (optional(whitespaces() ~> (identifier() | string()))
+          ~>> fn
+            nil -> nil
+            [_, identifier] -> identifier
+          end)
+      ~> optional(whitespaces())
+      ~> '{'
+      ~> newline()
+      ~> repeat(lazy(fn -> statements() end))
+      ~> '}'
+      ~>> fn list -> list |> Enum.at(5) |> Enum.flat_map(& &1) end
 
-  define :port, "<space?> <':'?> <space?> (compass_pt / (ID compass_pt?))" do
-    [[id, [direction]]] -> [direction: direction, id: id]
-    [[direction]] -> [direction: direction, id: nil]
-  end
+  defp id_statement, do: key_value() ~>> (&[%{type: "data", attributes: &1}])
 
-  define(
-    :compass_pt,
-    "<space?> <':'?> <space?> ('ne' / 'nw' / 'n'/ 'se' / 'sw' / 's' / 'e' / 'w' / 'c' / '_')"
-  )
+  defp edge_statement,
+    do:
+      node_id()
+      ~> optional(whitespaces())
+      ~> edge_op()
+      ~> optional(whitespaces())
+      ~> node_id()
+      ~> optional(whitespaces())
+      ~> repeat(attribute_list())
+      ~>> fn [from, _, mode, _, to, _, attributes] ->
+        [
+          %{
+            type: "edge",
+            mode: mode,
+            from: hd(from),
+            to: hd(to),
+            attributes: create_attribute_list(attributes)
+          }
+        ]
+      end
 
-  define :attribute_statement, "('graph' / 'node' / 'edge') <space?> attribute_list+" do
-    [type, attributes] -> [%{type: type, attributes: attributes |> create_attribute_list}]
-  end
+  defp node_statement,
+    do:
+      node_id()
+      ~> repeat(attribute_list())
+      ~>> fn [node_id, attributes] ->
+        [
+          %{
+            type: "node",
+            name: hd(node_id),
+            attributes: create_attribute_list(attributes)
+          }
+        ]
+      end
 
-  define :id_statement, "key_value" do
-    [kv] -> [%{type: "data", attributes: kv}]
-  end
+  defp attribute_statement,
+    do:
+      ("graph" | "node" | "edge")
+      ~> repeat(attribute_list(), 1)
+      ~>> fn [type, attributes] ->
+        [%{type: type, attributes: create_attribute_list(attributes)}]
+      end
 
-  define :attribute_list, "<space?> <'['> <space?>  list* <']'> <space?>" do
-    [l] -> l
-  end
+  defp node_id,
+    do: satisfy(identifier(), &(not (&1 in ["node", "edge", "graph"]))) ~> optional(port())
 
-  define(:list, "key_value <space?> <(';' / ',')?> <space?>") do
-    [l] -> l
-  end
+  defp edge_op, do: "--" | "->"
 
-  define :key_value, "ID <space?> <'='> <space?> ( ID / string)" do
-    [key, value] -> [{key, value}]
-  end
+  def port,
+    do:
+      optional(whitespaces())
+      ~> maybe(':')
+      ~> optional(whitespaces())
+      ~> (compass_pt() | identifier() ~> optional(compass_pt()))
+      ~>> fn
+        [_, _, _, [direction]] -> [direction: direction, id: nil]
+        [_, _, _, [id, direction]] -> [direction: direction, id: id]
+      end
 
-  define :string, "<'\"'> (double_string)* <'\"'>" do
-    [chars] -> Enum.join(chars)
-  end
+  defp compass_pt,
+    do:
+      optional(whitespaces())
+      ~> maybe(':')
+      ~> optional(whitespaces())
+      ~> (token(:ne)
+          | token(:nw)
+          | token(:n)
+          | token(:se)
+          | token(:sw)
+          | token(:s)
+          | token(:e)
+          | token(:w)
+          | token(:c)
+          | token(:_))
+      ~>> (&List.last/1)
 
-  define(:double_string, "(<!('\"' / '\\\\')> all) / (<'\\\\'> escape_sequence)")
+  defp attribute_list,
+    do:
+      optional(whitespaces())
+      ~> '['
+      ~> optional(whitespaces())
+      ~> repeat(list())
+      ~> ']'
+      ~> optional(whitespaces())
+      ~>> (&Enum.at(&1, 3))
 
-  define :escape_sequence, "'\"' / '\\\\' / 'b' / 'f' / 'n' / 'r' / 't' / 'v'" do
-    "b" -> "\b"
-    "f" -> "\f"
-    "n" -> "\n"
-    "r" -> "\r"
-    "t" -> "\t"
-    "v" -> "\v"
-    value -> value
-  end
+  defp list,
+    do:
+      key_value()
+      ~> optional(whitespaces())
+      ~> optional(';' | ',')
+      ~> optional(whitespaces())
+      ~>> (&List.first/1)
 
-  define :ID, "[a-zA-Z0-9_]+" do
-    list -> Enum.join(list)
-  end
-
-  define(:reserved_keywords, "('node' / 'edge' / 'graph')")
-  define(:space, "([ \\s\\t] / comment)*")
-  define(:all, "[\\r\\n] / .")
-  define(:newline, "([ \\r\\n\\s\\t] / comment)*")
+  defp key_value,
+    do:
+      identifier()
+      ~> optional(whitespaces())
+      ~> '='
+      ~> optional(whitespaces())
+      ~> (identifier() | string())
+      ~>> fn list -> {List.first(list), List.last(list)} end
 
   defp create_attribute_list(attributes) do
     attributes
-    |> Enum.flat_map(fn value -> Enum.reduce(value, [], &(&1 ++ &2)) end)
+    |> Enum.flat_map(& &1)
     |> Enum.into(%{})
   end
+
+  defp token(expected),
+    do:
+      identifier()
+      |> satisfy(fn found -> String.upcase(found) == String.upcase(expected) end)
+      |> map(fn _ -> expected end)
+
+  defp identifier,
+    do:
+      identifier_char()
+      |> repeat(1)
+      |> satisfy(&match?([_ | _], &1))
+      |> map(&to_string/1)
+
+  defp newline, do: repeat(' ' | '\r' | '\n' | '\s' | '\t')
+  defp whitespaces, do: repeat(' ' | '\s' | '\t', 1)
+
+  defp identifier_char, do: choice([ascii_letter(), char(?_), digit()])
+
+  def digit, do: satisfy(any(), fn char -> char in ?0..?9 end)
+
+  def ascii_letter, do: satisfy(any(), fn char -> char in ?A..?Z or char in ?a..?z end)
+
+  defp string,
+    do: '"' ~> repeat(double_string()) ~> '"' ~>> (&(&1 |> Enum.at(1) |> to_string()))
+
+  defp double_string,
+    do:
+      '\\' ~> escape_sequence() ~>> (&Enum.at(&1, 1)) | satisfy(any(), fn char -> char != ?" end)
+
+  defp escape_sequence,
+    do:
+      ('"' | '\\' | 'b' | 'f' | 'n' | 'r' | 's' | 't' | 'v')
+      ~>> fn
+        ?b -> ?\b
+        ?f -> ?\f
+        ?n -> ?\n
+        ?r -> ?\r
+        ?s -> ?\s
+        ?t -> ?\t
+        ?v -> ?\v
+        value -> value
+      end
+
+  def keyword(expected),
+    do:
+      identifier()
+      |> token()
+      |> satisfy(fn identifier ->
+        String.upcase(identifier) == String.upcase(to_string(expected))
+      end)
+      |> map(fn _ -> expected end)
 end

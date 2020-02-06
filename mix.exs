@@ -21,8 +21,7 @@ defmodule ExDot.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:neotomex, "~> 0.1.7"},
-      {:libgraph, "~> 0.7"}
+      {:libgraph, "~> 0.13.3"}
     ]
   end
 end
