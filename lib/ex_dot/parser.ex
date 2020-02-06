@@ -104,10 +104,11 @@ defmodule ExDot.Parser do
       optional(whitespaces())
       ~> maybe(':')
       ~> optional(whitespaces())
-      ~> (compass_pt() | identifier() ~> optional(compass_pt()))
+      ~> (compass_pt() | identifier() ~> optional(maybe(':') ~> compass_pt()))
       ~>> fn
         [_, _, _, [direction]] -> [direction: direction, id: nil]
-        [_, _, _, [id, direction]] -> [direction: direction, id: id]
+        [_, _, _, [id, nil]] -> [direction: nil, id: id]
+        [_, _, _, [id, [_, direction]]] -> [direction: direction, id: id]
       end
 
   defp compass_pt,
@@ -168,19 +169,19 @@ defmodule ExDot.Parser do
 
   defp identifier,
     do:
-      identifier_char()
-      |> repeat(1)
-      |> satisfy(&match?([_ | _], &1))
+      (printable_letter() | '_')
+      ~> repeat(identifier_char())
       |> map(&to_string/1)
 
   defp newline, do: repeat(' ' | '\r' | '\n' | '\s' | '\t')
   defp whitespaces, do: repeat(' ' | '\s' | '\t', 1)
 
-  defp identifier_char, do: choice([ascii_letter(), char(?_), digit()])
+  defp identifier_char, do: choice([printable_letter(), char(?_), digit()])
 
   def digit, do: satisfy(any(), fn char -> char in ?0..?9 end)
 
-  def ascii_letter, do: satisfy(any(), fn char -> char in ?A..?Z or char in ?a..?z end)
+  def printable_letter,
+    do: satisfy(any(), fn char -> char in ?A..?Z or char in ?a..?z or char in ?È..?Ź end)
 
   defp string,
     do: '"' ~> repeat(double_string()) ~> '"' ~>> (&(&1 |> Enum.at(1) |> to_string()))
