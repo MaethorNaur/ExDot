@@ -6,7 +6,7 @@ defmodule ExDot.Parser do
 
   defp graph,
     do:
-      optional(whitespaces())
+      newline()
       ~> optional("strict" ~> whitespaces())
       ~> ("graph" | "digraph")
       ~> (optional(whitespaces() ~> (identifier() | string()))
@@ -19,7 +19,8 @@ defmodule ExDot.Parser do
       ~> newline()
       ~> repeat(statements())
       ~> '}'
-      ~>> fn [_, strict, graph, name, _, _, _, statements, _] ->
+      ~> newline()
+      ~>> fn [_, strict, graph, name, _, _, _, statements, _, _] ->
         %{
           strict: !is_nil(strict),
           mode: graph,
@@ -29,48 +30,81 @@ defmodule ExDot.Parser do
       end
 
   defp statements,
-    do: statement() ~> optional(whitespaces()) ~> maybe(';') ~> newline() ~>> (&Enum.at(&1, 0))
+    do:
+      statement()
+      ~> optional(whitespaces())
+      ~> maybe(';')
+      ~> newline()
+      ~>> (&List.first/1)
+      |> named("statements")
 
   defp statement,
-    do: subgraph() | id_statement() | edge_statement() | node_statement() | attribute_statement()
+    do:
+      (id_statement()
+       | edge_statement()
+       | node_statement()
+       | attribute_statement()
+       | subgraph())
+      |> named("statement")
 
   defp subgraph,
     do:
-      "subgraph"
-      ~> (optional(whitespaces() ~> (identifier() | string()))
-          ~>> fn
-            nil -> nil
-            [_, identifier] -> identifier
-          end)
-      ~> optional(whitespaces())
+      optional(
+        "subgraph"
+        ~> whitespaces()
+        ~> (identifier() | string())
+        ~> optional(whitespaces())
+      )
       ~> '{'
       ~> newline()
-      ~> repeat(lazy(fn -> statements() end))
+      ~> lazy(fn -> repeat(statements()) end)
       ~> '}'
-      ~>> fn list -> list |> Enum.at(5) |> Enum.flat_map(& &1) end
+      ~>> fn list -> list |> Enum.at(3) |> Enum.flat_map(& &1) end
+      |> named("subgraph")
 
-  defp id_statement, do: key_value() ~>> (&[%{type: "data", attributes: &1}])
+  defp id_statement,
+    do: key_value() ~>> (&[%{type: "data", attributes: &1}]) |> named("id_statement")
 
   defp edge_statement,
     do:
-      node_id()
+      (node_id() | subgraph())
       ~> optional(whitespaces())
       ~> edge_op()
       ~> optional(whitespaces())
-      ~> node_id()
+      ~> (node_id() | subgraph())
       ~> optional(whitespaces())
       ~> repeat(attribute_list())
       ~>> fn [from, _, mode, _, to, _, attributes] ->
-        [
-          %{
-            type: "edge",
-            mode: mode,
-            from: hd(from),
-            to: hd(to),
-            attributes: create_attribute_list(attributes)
-          }
-        ]
+        attributes = create_attribute_list(attributes)
+
+        to =
+          to
+          |> Enum.reject(&is_nil/1)
+          |> Enum.map(fn
+            %{name: name} -> name
+            name -> name
+          end)
+
+        from
+        |> Enum.reject(&is_nil/1)
+        |> Enum.map(fn
+          %{name: name} -> name
+          name -> name
+        end)
+        |> Enum.flat_map(fn from ->
+          to
+          |> Enum.map(fn to ->
+            %{
+              type: "edge",
+              mode: mode,
+              from: from,
+              to: to,
+              attributes: attributes
+            }
+          end)
+        end)
       end
+      |> named("edge_statement")
 
   defp node_statement,
     do:
@@ -85,6 +119,7 @@ defmodule ExDot.Parser do
           }
         ]
       end
+      |> named("node_statement")
 
   defp attribute_statement,
     do:
@@ -93,16 +128,20 @@ defmodule ExDot.Parser do
       ~>> fn [type, attributes] ->
         [%{type: type, attributes: create_attribute_list(attributes)}]
       end
+      |> named("attribute_statement")
 
   defp node_id,
-    do: satisfy(identifier(), &(not (&1 in ["node", "edge", "graph"]))) ~> optional(port())
+    do:
+      satisfy(identifier(), &(not (&1 in ["node", "edge", "graph"])))
+      ~> optional(port())
+      |> named("node_id")
 
   defp edge_op, do: "--" | "->"
 
   def port,
     do:
       optional(whitespaces())
-      ~> maybe(':')
+      ~> ':'
       ~> optional(whitespaces())
       ~> (compass_pt() | identifier() ~> optional(maybe(':') ~> compass_pt()))
       ~>> fn
@@ -110,6 +149,7 @@ defmodule ExDot.Parser do
         [_, _, _, [id, nil]] -> [direction: nil, id: id]
         [_, _, _, [id, [_, direction]]] -> [direction: direction, id: id]
       end
+      |> named("port")
 
   defp compass_pt,
     do:
@@ -127,6 +167,7 @@ defmodule ExDot.Parser do
           | token(:c)
           | token(:_))
       ~>> (&List.last/1)
+      |> named("compass_pt")
 
   defp attribute_list,
     do:
@@ -137,6 +178,7 @@ defmodule ExDot.Parser do
       ~> ']'
       ~> optional(whitespaces())
       ~>> (&Enum.at(&1, 3))
+      |> named("attribute_list")
 
   defp list,
     do:
@@ -145,6 +187,7 @@ defmodule ExDot.Parser do
       ~> optional(';' | ',')
       ~> optional(whitespaces())
       ~>> (&List.first/1)
+      |> named("list")
 
   defp key_value,
     do:
@@ -154,6 +197,7 @@ defmodule ExDot.Parser do
       ~> optional(whitespaces())
       ~> (identifier() | string())
       ~>> fn list -> {List.first(list), List.last(list)} end
+      |> named("key_value")
 
   defp create_attribute_list(attributes) do
     attributes
@@ -164,17 +208,52 @@ defmodule ExDot.Parser do
   defp token(expected),
     do:
       identifier()
-      |> satisfy(fn found -> String.upcase(found) == String.upcase(expected) end)
+      |> satisfy(fn found -> String.upcase(found) == String.upcase(to_string(expected)) end)
       |> map(fn _ -> expected end)
+      |> named(to_string(expected))
 
   defp identifier,
     do:
-      (printable_letter() | '_')
-      ~> repeat(identifier_char())
-      |> map(&to_string/1)
+      ((printable_letter() | '_') ~> repeat(identifier_char()) ~>> (&concat/1)
+       | maybe('-')
+         ~> ('.' ~> repeat(digit(), 1) ~>> (&concat/1)
+             | repeat(digit(), 1)
+               ~> optional(
+                 maybe('.')
+                 ~> repeat(digit(), 1)
+                 ~>> (&concat/1)
+               )
+               ~>> (&concat/1))
+         ~>> (&concat/1))
+      ~>> (&to_string/1)
+      |> named("identifier")
 
-  defp newline, do: repeat(' ' | '\r' | '\n' | '\s' | '\t')
-  defp whitespaces, do: repeat(' ' | '\s' | '\t', 1)
+  defp concat([nil, right]), do: right
+  defp concat([left, nil]), do: left
+  defp concat([left, right]) when is_list(left), do: left ++ right
+  defp concat([left, right]), do: [left | right]
+
+  defp comment, do: line_comment() | multiline_comment()
+
+  defp line_comment,
+    do: ("//" | '#') ~> repeat(satisfy(any(), fn char -> not (char in [?\n, ?\r]) end))
+
+  defp multiline_comment,
+    do:
+      "/*"
+      ~> repeat_until(any(), fn acc ->
+        case Enum.reverse(acc) do
+          [?/, ?* | _] ->
+            false
+
+          _ ->
+            true
+        end
+      end)
+
+  defp newline, do: repeat(comment() | ' ' | '\r' | '\n' | '\s' | '\t')
+
+  defp whitespaces, do: repeat(comment() | ' ' | '\s' | '\t', 1)
 
   defp identifier_char, do: choice([printable_letter(), char(?_), digit()])
 
