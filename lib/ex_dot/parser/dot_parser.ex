@@ -1,8 +1,13 @@
-defmodule ExDot.Parser do
-  defstruct [:input, line: 0, position: 0]
+defmodule ExDot.Parser.DotParser do
+  alias ExDot.Parser.HTMLParser
   use ExDot.Parser.Combinator
 
-  def parse(input), do: graph().(input)
+  def parse(input) do
+    HTMLParser.start_link()
+    result = graph().(input)
+    HTMLParser.stop()
+    result
+  end
 
   defp graph,
     do:
@@ -195,7 +200,14 @@ defmodule ExDot.Parser do
       ~> optional(whitespaces())
       ~> '='
       ~> optional(whitespaces())
-      ~> (identifier() | string())
+      ~> (identifier()
+          | string()
+          | '<'
+            ~> newline()
+            ~> HTMLParser.tag()
+            ~> newline()
+            ~> '>'
+            ~>> (&(Enum.at(&1, 2) |> to_string())))
       ~>> fn list -> {List.first(list), List.last(list)} end
       |> named("key_value")
 
@@ -255,11 +267,11 @@ defmodule ExDot.Parser do
 
   defp whitespaces, do: repeat(comment() | ' ' | '\s' | '\t', 1)
 
-  defp identifier_char, do: choice([printable_letter(), char(?_), digit()])
+  defp identifier_char, do: printable_letter() | '_' | digit()
 
-  def digit, do: satisfy(any(), fn char -> char in ?0..?9 end)
+  defp digit, do: satisfy(any(), fn char -> char in ?0..?9 end)
 
-  def printable_letter,
+  defp printable_letter,
     do: satisfy(any(), fn char -> char in ?A..?Z or char in ?a..?z or char in ?È..?Ź end)
 
   defp string,

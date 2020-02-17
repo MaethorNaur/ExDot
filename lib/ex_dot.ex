@@ -1,7 +1,7 @@
 defmodule ExDot do
   @spec from_string(String.t()) :: {:ok, Graph.t()} | {:error, term()}
   def from_string(string) do
-    string |> ExDot.Parser.parse() |> create_graph
+    string |> ExDot.Parser.DotParser.parse() |> create_graph
   end
 
   @spec from_file(String.t()) :: {:ok, Graph.t()} | {:error, term()}
